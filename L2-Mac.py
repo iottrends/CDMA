@@ -33,6 +33,8 @@ received_signal = combined_signal + noise
 # Despread the signals for both users
 despread_user1 = np.dot(received_signal.reshape(-1, sf), code_user1) / sf
 despread_user2 = np.dot(received_signal.reshape(-1, sf), code_user2) / sf
+print("\ndespread_user1")
+print(despread_user1)
 
 # Plotting
 fig, axs = plt.subplots(1, 3, figsize=(18, 6))

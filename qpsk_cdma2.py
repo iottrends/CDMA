@@ -1,115 +1,124 @@
-import numpy as np
+"""
+working code with
+multi-SF composite signal.
+Here we are generating 8 bytes of random data for each user[8 users]
+converting those 8 bytes to qpsk symbol.
+multiplying qpsk symbol by ovsf_code[user] generating the Spread signal.
+then adding it for all 8 users to generate a composite_cdma_signal.
+therefore, 64 bytes of data is encoded and spread in composite_cdma_signal.
+then Added Noise to this Signal.
 
+After this signal is decoded by rx_chain
+and we are able to extract the qpsk_sym[user] after despreading the noisy composite cdma signal.
+We are getting noisy qpsk signal[-1.2 , +1.2] and this is good!!.
+We successfuly spread the qpsk symoland despread it from the composite symbol.
+What it means?
+we packed 64 bytes of data using 8 ovsf codes, into a composite signal.
+and then we were able to extract back all the individual qpsk signal for each user [-1 to +1 with some noise]
+and then qpsk demod we mapped back to bits.
+compared the received bytes with original and it is matching all 64 bits.
+
+"""
+
+
+import numpy as np
+import matplotlib.pyplot as plt
 
 # Function to generate random 8-bit data for each user
 def generate_random_data(num_bytes):
     return np.random.randint(0, 2, (num_bytes, 8))
 
-
 # Function to modulate data using QPSK
 def qpsk_modulate(data_bits):
-    # Ensure that data_bits has an even number of bits (pairs of bits for QPSK)
     if len(data_bits) % 2 != 0:
         data_bits = np.append(data_bits, 0)  # Add a zero bit if odd
 
-    # Map pairs of bits to QPSK symbols (-1, 1)
-    symbols = 2 * data_bits.reshape(-1, 2) - 1  # Reshape to pairs and map to (-1, 1)
-    qpsk_symbols = symbols[:, 0] + 1j * symbols[:, 1]  # Map pairs of bits to complex QPSK symbols
+    symbols = 2 * data_bits.reshape(-1, 2) - 1  # Map to (-1, 1)
+    qpsk_symbols = symbols[:, 0] + 1j * symbols[:, 1]
     return qpsk_symbols
-
 
 # Function to spread QPSK symbols using OVSF codes
 def spread_symbols(qpsk_symbols, ovsf_code, sf):
-    spread_symbols = []
-    for symbol in qpsk_symbols:
-        spread_symbol = symbol * np.array(ovsf_code)
-        spread_symbols.extend(spread_symbol)
-    return np.array(spread_symbols)
+    # Repeat each QPSK symbol by the spreading factor
+    spread_symbols = np.repeat(qpsk_symbols, sf)
 
+    # Tile the OVSF code to match the length of the repeated symbols
+    spread_symbol = spread_symbols * np.tile(ovsf_code, len(qpsk_symbols))
+    return spread_symbol
 
-# Function to add AWGN noise to the signal
+# Function to add AWGN noise
 def add_awgn(signal, snr_db):
     noise_power = 10 ** (-snr_db / 10)
     noise = np.sqrt(noise_power / 2) * (np.random.randn(len(signal)) + 1j * np.random.randn(len(signal)))
-    noisy_signal = signal + noise
-    return noisy_signal
+    return signal + noise
 
-
-# Function to despread the received noisy signal using the OVSF codes
-
+# Function to despread the received signal using OVSF codes
 def despread_signal(noisy_signal, ovsf_code, sf):
-    # Calculate how many repetitions of the OVSF code are needed to match the length of the noisy signal
-    num_repeats = len(noisy_signal) // len(ovsf_code)
+    # Reshape noisy signal into chunks of size sf
+    reshaped_signal = noisy_signal.reshape(-1, sf)
 
-    # Repeat the OVSF code to match the length of the noisy signal
-    extended_ovsf_code = np.tile(ovsf_code, num_repeats)
+    # Perform dot product between each chunk and OVSF code, then normalize by dividing by sf
+    despread_signal = np.dot(reshaped_signal, ovsf_code) / sf
 
-    # Despread the noisy signal by multiplying with the extended OVSF code
-    despreaded_signal = noisy_signal * extended_ovsf_code
-    return despreaded_signal
+    return despread_signal
 
-
-# Function to demodulate QPSK symbols (from complex to binary bits)
+# Function to demodulate QPSK symbols
 def qpsk_demodulate(despread_signal):
     real_part = np.real(despread_signal)
     imag_part = np.imag(despread_signal)
-    bits = np.array([(1 if real_part[i] > 0 else 0, 1 if imag_part[i] > 0 else 0) for i in range(len(real_part))])
+    bits = np.array([(1 if real > 0 else 0, 1 if imag > 0 else 0) for real, imag in zip(real_part, imag_part)])
     return bits.flatten()
-
 
 # Function to convert bits to bytes
 def bits_to_bytes(bits, num_bytes):
     bytes_data = np.array([bits[i:i + 8] for i in range(0, len(bits), 8)])
     return bytes_data[:num_bytes]
 
+# Function to transmit QPSK for a user
+def qpsk_tx_chain(random_data, ovsf_code, sf):
+    qpsk_symbols = qpsk_modulate(random_data.flatten())
+    spread_symbols_output = spread_symbols(qpsk_symbols, ovsf_code, sf)
+    return spread_symbols_output
 
-# Transmit data for all users in parallel
-# Transmit data for all users in parallel
-def qpsk_tx_chain(random_data, ovsf_codes, sf):
-    qpsk_symbols_list = []
-    spread_symbols_list = []
+# Function to decode QPSK for a user
+def qpsk_rx_chain(noisy_signal, ovsf_code, sf, num_bytes):
+    despread_signal_result = despread_signal(noisy_signal, ovsf_code, sf)
+    print("\n Despread Signal")
+    print(despread_signal_result)
+    decoded_bits = qpsk_demodulate(despread_signal_result)
+    decoded_bytes = bits_to_bytes(decoded_bits, num_bytes)
+    return decoded_bytes
 
-    # Modulate and spread data for all users in parallel
-    for i, data in enumerate(random_data):
-        qpsk_symbols = qpsk_modulate(data.flatten())  # Flatten and modulate
-        user_spread_symbols = spread_symbols(qpsk_symbols, ovsf_codes[i], sf)  # Spread using respective OVSF code
-        qpsk_symbols_list.append(qpsk_symbols)
-        spread_symbols_list.append(user_spread_symbols)
+# Function to plot QPSK symbols for all users
+def plot_qpsk_symbols(original_data_list, noisy_signal, ovsf_codes, snr_db, num_of_users, sf):
+    plt.figure(figsize=(8, 8))
 
-    # Combine all users' spread symbols
-    composite_qpsk_signal = np.sum(np.array(spread_symbols_list), axis=0)
+    # Plot QPSK symbols without noise
+    for i in range(num_of_users):
+        qpsk_symbols = qpsk_modulate(original_data_list[i].flatten())
+        plt.scatter(np.real(qpsk_symbols), np.imag(qpsk_symbols), label=f'User {i + 1} (No Noise)', marker='o')
 
-    # Add AWGN noise
-    snr_db = 10  # Signal-to-noise ratio in dB
-    noisy_signal = add_awgn(composite_qpsk_signal, snr_db)
-    return noisy_signal, random_data
+    # Plot QPSK symbols with noise
+    for i in range(num_of_users):
+        qpsk_symbols = qpsk_modulate(original_data_list[i].flatten())
+        noisy_qpsk_symbols = add_awgn(qpsk_symbols, snr_db)
+        plt.scatter(np.real(noisy_qpsk_symbols), np.imag(noisy_qpsk_symbols), label=f'User {i + 1} (With Noise)', marker='x')
 
+    plt.title(f'QPSK Symbols for All Users (SNR = {snr_db} dB)')
+    plt.xlabel('In-Phase')
+    plt.ylabel('Quadrature')
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
-# Receiver function to handle parallel transmission and demodulate
-def qpsk_rx_chain(noisy_signal, ovsf_codes, sf, num_users):
-    decoded_data = []
-
-    # Perform despreading and demodulation for each user
-    for i, ovsf_code in enumerate(ovsf_codes):
-        # Despread the noisy signal using the respective OVSF code
-        despread_signal_result = despread_signal(noisy_signal, ovsf_code, sf)
-
-        # QPSK Demodulation
-        decoded_bits = qpsk_demodulate(despread_signal_result)
-
-        # Convert bits to bytes
-        decoded_bytes = bits_to_bytes(decoded_bits, num_users)
-
-        decoded_data.append(decoded_bytes)
-
-    return decoded_data
-
-
-# Main execution flow for parallel transmission
+# Main execution
 def main():
     sf = 8  # Spreading factor
-    num_bytes = 8  # Number of bytes per user
-    num_users = 8  # Number of users
+    num_bytes = 8  # Number of bytes
+    num_of_users = 8  # Number of users
+
+    # Define 8 OVSF codes (for demonstration, could be changed)
     ovsf_codes = [
         [1, 1, 1, 1, 1, 1, 1, 1],
         [1, -1, 1, -1, 1, -1, 1, -1],
@@ -121,26 +130,59 @@ def main():
         [1, -1, -1, 1, -1, 1, 1, -1]
     ]
 
-    # Step 1: Generate random data for each user
-    random_data = [generate_random_data(num_bytes) for _ in range(num_users)]
-    print("Original Data (8-bit bytes):\n", random_data)
+    # Initialize composite CDMA signal
+    composite_cdma_signal = np.zeros(num_bytes * 4 * sf, dtype=complex)
 
-    # Step 2: Transmit data for all users in parallel
-    noisy_signal, original_data = qpsk_tx_chain(random_data, ovsf_codes, sf)
-    print("\nNoisy Signal (Composite QPSK):\n", noisy_signal)
+    original_data_list = []
 
-    # Step 3: Receive and demodulate the noisy signal
-    decoded_data = qpsk_rx_chain(noisy_signal, ovsf_codes, sf, num_users)
-    print("\ndecoded_data")
-    print(decoded_data)
-""""
-    # Step 4: Verify if the decoded data matches the original data
-    for i, decoded in enumerate(decoded_data):
-        data_match = np.array_equal(original_data[i], decoded)
-        print(f"Data Match for User {i + 1}: {data_match}")
-        print("Original Data (8-bit bytes):\n", original_data[i])
-        print("Decoded Data (8-bit bytes):\n", decoded)
-"""
+    print("Starting Multi-User CDMA Transmission!")
+
+    # Step 1: Generate data for each user and transmit
+    for i in range(num_of_users):
+        random_data = generate_random_data(num_bytes)
+        original_data_list.append(random_data)
+        print(f"User {i + 1} Original Data:\n", random_data)
+
+        # QPSK Transmission Chain for user i
+        qpsk_cdma_noisy_signal = qpsk_tx_chain(random_data, ovsf_codes[i], sf)
+        # Sum the spread signals from all users
+        composite_cdma_signal += qpsk_cdma_noisy_signal
+
+    # Step 2: Add AWGN noise to the composite signal
+    snr_db = 15
+    print("\n composite signal w/o noise")
+    print(composite_cdma_signal)
+    noisy_signal = add_awgn(composite_cdma_signal, snr_db)  # Adding noise here
+    print("\nComposite signal with noise:")
+    print(noisy_signal)
+
+    # Step 3: Plot all QPSK symbols
+   # plot_qpsk_symbols(original_data_list, noisy_signal, ovsf_codes, snr_db, num_of_users, sf)
+
+    print("RX chain start....")
+    # Step 4: Despread and decode for each user
+    for i in range(num_of_users):
+        print(f"\n##### DE-MODULATION FOR USER {i + 1} #####")
+        decoded_bytes = qpsk_rx_chain(noisy_signal, ovsf_codes[i], sf, num_bytes)
+
+        # Verify if the decoded data matches the original data
+        data_match = np.array_equal(original_data_list[i], decoded_bytes)
+        print(f"User {i + 1} Data Match:", data_match)
+        if not data_match:
+            print(f"Decoded Data:\n{decoded_bytes}\nOriginal Data:\n{original_data_list[i]}")
+            # Print additional details for debugging, if necessary
+            print("Difference between original and decoded data:")
+            diff = np.abs(original_data_list[i] - decoded_bytes)
+            print(diff)
+
+        if data_match:
+            print("\nSuccess")
+            print("\n Decoded data ")
+            print(decoded_bytes)
+            print("\n Original Data")
+            print(original_data_list[i])
+            print(f"Length of noisy_signal: {len(noisy_signal)}")
+
 
 if __name__ == "__main__":
     main()
