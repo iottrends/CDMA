@@ -23,6 +23,7 @@ compared the received bytes with original and it is matching all 64 bits.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 # Function to generate random 8-bit data for each user
 def generate_random_data(num_bytes):
@@ -83,8 +84,8 @@ def qpsk_tx_chain(random_data, ovsf_code, sf):
 # Function to decode QPSK for a user
 def qpsk_rx_chain(noisy_signal, ovsf_code, sf, num_bytes):
     despread_signal_result = despread_signal(noisy_signal, ovsf_code, sf)
-    print("\n Despread Signal")
-    print(despread_signal_result)
+    #print("\n Despread Signal")
+    #print(despread_signal_result)
     decoded_bits = qpsk_demodulate(despread_signal_result)
     decoded_bytes = bits_to_bytes(decoded_bits, num_bytes)
     return decoded_bytes
@@ -136,25 +137,28 @@ def main():
     original_data_list = []
 
     print("Starting Multi-User CDMA Transmission!")
-
+    start_time_ns = time.time_ns()
     # Step 1: Generate data for each user and transmit
     for i in range(num_of_users):
         random_data = generate_random_data(num_bytes)
         original_data_list.append(random_data)
-        print(f"User {i + 1} Original Data:\n", random_data)
+        #print(f"User {i + 1} Original Data:\n", random_data)
 
         # QPSK Transmission Chain for user i
         qpsk_cdma_noisy_signal = qpsk_tx_chain(random_data, ovsf_codes[i], sf)
         # Sum the spread signals from all users
         composite_cdma_signal += qpsk_cdma_noisy_signal
-
+    end_time_ns = time.time_ns()
+    # Calculate the elapsed time in nanoseconds
+    execution_time_ns = end_time_ns - start_time_ns
+    print(f"Execution time EnCoding: {execution_time_ns/1000} micro-seconds")
     # Step 2: Add AWGN noise to the composite signal
     snr_db = 15
-    print("\n composite signal w/o noise")
-    print(composite_cdma_signal)
+    #print("\n composite signal w/o noise")
+    #print(composite_cdma_signal)
     noisy_signal = add_awgn(composite_cdma_signal, snr_db)  # Adding noise here
-    print("\nComposite signal with noise:")
-    print(noisy_signal)
+    #print("\nComposite signal with noise:")
+   # print(noisy_signal)
 
     # Step 3: Plot all QPSK symbols
    # plot_qpsk_symbols(original_data_list, noisy_signal, ovsf_codes, snr_db, num_of_users, sf)
@@ -181,7 +185,7 @@ def main():
             print(decoded_bytes)
             print("\n Original Data")
             print(original_data_list[i])
-            print(f"Length of noisy_signal: {len(noisy_signal)}")
+           # print(f"Length of noisy_signal: {len(noisy_signal)}")
 
 
 if __name__ == "__main__":
